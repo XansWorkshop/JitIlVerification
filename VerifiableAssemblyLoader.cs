@@ -136,6 +136,7 @@ public class VerifiableAssemblyLoader
         }
 
         var importer = new ILImporter(methodBase);
+		importer.UnsafeAllowStackalloc = true;
         importer.SanityChecks = false;
         importer.ReportVerificationError = (args, err) => {
             if (0 == args.Length)

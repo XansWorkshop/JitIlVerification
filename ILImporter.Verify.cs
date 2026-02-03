@@ -192,7 +192,17 @@ partial class ILImporter
 
     public Action<ErrorArgument[], VerifierError> ReportVerificationError { set; private get; }
 
-    public bool SanityChecks { set; private get; }
+    public bool SanityChecks { get; set; }
+
+	/// <summary>
+	/// Added by Xan: This allows stackalloc, and storing/loading pointer values.
+	/// </summary>
+	public bool UnsafeAllowPointers { get; set; }
+
+	/// <summary>
+	/// Added by Xan: This allows stackalloc.
+	/// </summary>
+	public bool UnsafeAllowStackalloc { get; set; }
 
     public void Verify()
     {
@@ -1224,14 +1234,17 @@ partial class ILImporter
             opCode = (ILOpcode)(0x100 + _ilBytes[instructionOffset + 1]);
 
         return opCode;
-    }
+	}
 
-    void Unverifiable()
-    {
-        VerificationError(VerifierError.Unverifiable);
-    }
+	void Unverifiable() {
+		VerificationError(VerifierError.Unverifiable);
+	}
 
-    void HandleTokenResolveException(int token)
+	void UnverifiableDueToPointers() {
+		VerificationError(VerifierError.UnmanagedPointer);
+	}
+
+	void HandleTokenResolveException(int token)
     {
         var args = new ErrorArgument[]
             {
@@ -1442,16 +1455,21 @@ partial class ILImporter
         if (!argument)
             Check(_initLocals, VerifierError.InitLocals);
 
-        CheckIsNotPointer(varType);
+
+		if (!UnsafeAllowPointers)
+			// Not Added by Xan 2025 (this was here already)
+			// Disallow loading pointers.
+			// This is commented now because of the change to ImportStoreVar
+			CheckIsNotPointer(varType);
 
         var stackValue = StackValue.CreateFromType(varType);
         if (index == 0 && argument && _thisType != null)
         {
             Debug.Assert(varType == _thisType);
             stackValue.SetIsThisPtr();
-        }
+		}
 
-        Push(stackValue);
+		Push(stackValue);
     }
 
     void ImportStoreVar(int index, bool argument)
@@ -1464,7 +1482,14 @@ partial class ILImporter
             Check(index != 0 || !argument, VerifierError.ThisUninitStore);
 
         CheckIsAssignable(value, StackValue.CreateFromType(varType));
-    }
+
+		if (!UnsafeAllowPointers)
+			// Added by Xan 2025
+			// Disallow storing pointers as well.
+			// See also: ImportLocalAlloc is no longer an error
+			CheckIsNotPointer(varType);
+
+	}
 
     void ImportAddressOfVar(int index, bool argument)
     {
@@ -2529,7 +2554,8 @@ partial class ILImporter
 
     void ImportLocalAlloc()
     {
-        Unverifiable();
+		if (!UnsafeAllowPointers && !UnsafeAllowStackalloc)
+			UnverifiableDueToPointers();
 
         var size = Pop();
 
